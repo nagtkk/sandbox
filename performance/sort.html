@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8"/>
+        <style>
+            * {font-family: Consolas, "Andale Mono WT", "Andale Mono", "Lucida Console", "Lucida Sans Typewriter", "DejaVu Sans Mono", "Bitstream Vera Sans Mono", "Liberation Mono", "Nimbus Mono L", Monaco, "Courier New", Courier, monospace;
+            }
+            #results th {
+                min-width: 8em;
+            }
+            #results td {
+                color: #333;
+                background: #ccc;
+                text-align: right;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Array sort test</h1>
+        <label>array size: <input id="arraySize" type="number" min="1" value="100000"></label><br/>
+        <button type="button" onclick="runTest()">run test</button>
+        <button type="button" onclick="clearTest()">clear</button><br/>
+        <hr>
+        <table id="results">
+            <caption>results</caption>
+            <tr><th>Test</th><th>size</th><th>Array.sort [ms]</th><th>introSort [ms]</th><th>speed up [%]</th></tr>
+        </table>
+        <script>
+            "use strict";
+
+const compareDefault = (x, y) => x < y ? -1 : x > y ? 1 : 0;
+
+const med3 = (x, y, z, cmp) =>
+    cmp(x, y) < 0 ?
+        cmp(y, z) < 0 ? y : cmp(z, x) < 0 ? x : z :
+        cmp(z, y) < 0 ? y : cmp(x, z) < 0 ? x : z;
+
+const quickSort = (a, cmp = compareDefault, i = 0, j = a.length) => {
+    if (i < j) {
+        let p = i, q = j - 1;
+        const pivot = med3(a[p], a[p + ((q - p) >> 1)], a[q], cmp);
+        for (; ; p++ , q--) {
+            while (cmp(a[p], pivot) < 0) p++;
+            while (cmp(pivot, a[q]) < 0) q--;
+            if (p >= q) break;
+            const t = a[p];
+            a[p] = a[q];
+            a[q] = t;
+        }
+        quickSort(a, cmp, i, p);
+        quickSort(a, cmp, q + 1, j);
+    }
+    return a;
+};
+
+const heapSort = (a, cmp = compareDefault, i = 0, j = a.length) => {
+    const n = j - i;
+    let k = 0;
+    while (++k < n) {
+        let c = k;
+        const cv = a[c + i];
+        while (c > 0) {
+            const p = ((c + 1) >> 1) - 1;
+            const pv = a[p + i];
+            if (cmp(pv, cv) >= 0) break;
+            a[c + i] = pv;
+            c = p;
+        }
+        a[c + i] = cv;
+    }
+    while (--k > 0) {
+        let p = 0;
+        const pv = a[k + i];
+        a[k + i] = a[i];
+        for (; ;) {
+            const cr = (p + 1) << 1;
+            const cl = cr - 1;
+            if (!(cl < k)) break;
+            const c = (cr >= k || cmp(a[cl + i], a[cr + i]) >= 0) ? cl : cr;
+            const cv = a[c + i];
+            if (cmp(pv, cv) >= 0) break;
+            a[p + i] = cv;
+            p = c;
+        }
+        a[p + i] = pv;
+    }
+    return a;
+};
+
+const insertionSort = (a, cmp = compareDefault, i = 0, j = a.length) => {
+    for (let p = i + 1; p < j; p++) {
+        const v = a[p];
+        let q = p, r = p - 1;
+        if (cmp(v, a[i]) < 0)
+            for (; i < q; q = r--) a[q] = a[r];
+        else
+            for (; cmp(v, a[r]) < 0; q = r--) a[q] = a[r];
+        a[q] = v;
+    }
+    return a;
+};
+
+const ilog2 = n => {
+    let d = 0;
+    for (; n > 1; n >>>= 1) d++;
+    return d;
+};
+
+const INTRO_MIN = 32;
+const introSort = (a, cmp = compareDefault, i = 0, j = a.length) => {
+    const sub = (a, i, j, cmp, depth) => {
+        if (j - i < INTRO_MIN) return insertionSort(a, cmp, i, j);
+        if (depth-- <= 0) return heapSort(a, cmp, i, j);
+        let p = i, q = j - 1;
+        const pivot = med3(a[p], a[p + ((q - p) >> 1)], a[q], cmp);
+        for (; ; p++ , q--) {
+            while (cmp(a[p], pivot) < 0) p++;
+            while (cmp(pivot, a[q]) < 0) q--;
+            if (p >= q) break;
+            const t = a[p];
+            a[p] = a[q];
+            a[q] = t;
+        }
+        sub(a, i, p, cmp, depth);
+        sub(a, q + 1, j, cmp, depth);
+        return a;
+    };
+
+    return sub(a, i, j, cmp, 2 * ilog2(j - i));
+};
+
+const genRandomArray = length =>
+    Array.from({ length }, _ => ({
+        value: ~~(Math.random() * length)
+    }));
+const comparator = (a, b) => a.value - b.value;
+
+function test(name, f) {
+    performance.mark('begin sort');
+    f();
+    performance.mark('end sort');
+
+    performance.measure(name, 'begin sort','end sort');
+    const result = performance.getEntriesByName(name)[0];
+    performance.clearMarks();
+    performance.clearMeasures();
+    return result.duration;
+}
+
+let testCount = 1;
+function runTest(warmUp) {
+    const size = Number(document.getElementById('arraySize').value);
+    const def = genRandomArray(size);
+    let a = def.slice();
+    let t0 = test("Array.sort", () => a.sort(comparator));
+    let b = def.slice();
+    let t1 = test("introSort", () => introSort(b, comparator));
+    if (!warmUp) {
+        const table = document.getElementById('results');
+        const row = table.insertRow();
+        row.insertCell().append(testCount++);
+        row.insertCell().append(size);
+        row.insertCell().append(t0.toFixed(3).padStart(10));
+        row.insertCell().append(t1.toFixed(3).padStart(10));
+        row.insertCell().append(Math.round(100 * t0 / t1) + '%');
+    }
+}
+function clearTest() {
+    const table = document.getElementById('results');
+    while (table.rows.length > 1) table.rows[1].remove();
+    testCount = 1;
+}
+        </script>
+    </body>
+</html>
